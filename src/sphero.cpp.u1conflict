@@ -1,0 +1,118 @@
+#include <ros/ros.h>
+#include <cv_bridge/cv_bridge.h>
+#include <image_transport/image_transport.h>
+#include <sensor_msgs/image_encodings.h>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/objdetect/objdetect.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/ml/ml.hpp>
+#include <geometry_msgs/Twist.h>
+#include <sensor_msgs/Joy.h>
+#include <fstream>
+
+class Sphero {
+
+private:
+    cv::NormalBayesClassifier nbClassifier;
+    bool fileExists(const std::string& fname);
+    std::string vidSource, modelFilename, windowName, searchWindowName;
+    double kineticScaling, imageScaling;
+    ros::NodeHandle nh;
+    ros::Subscriber joySub;
+    image_transport::Subscriber sub;
+
+    void callbackJoyMsg(const sensor_msgs::Joy::ConstPtr& msg){
+
+    }
+
+    void spheroDetectSphero(const sensor_msgs::ImageConstPtr& msg){
+        cv::Mat smallFrame;
+        cv_bridge::CvImagePtr cv_ptr;
+        cv::resize(cv_ptr->image, smallFrame, cv::Size(0,0), imageScaling,  imageScaling);
+        cv::Mat vectorizedFrame = smallFrame.reshape(1, smallFrame.rows*smallFrame.cols);
+        cv::Mat testf, labelf;
+        vectorizedFrame.convertTo(testf, CV_32FC1, 1.0/255.0, 1.0);
+        nbClassifier.predict(testf, &labelf);
+
+        labelf = labelf.reshape(1, smallFrame.rows);
+        cv::dilate(labelf, labelf, cv::Mat::ones(3,3, CV_32FC1), cv::Point(-1,-1), 2);
+        cv::erode(labelf, labelf, cv::Mat::ones(3,3, CV_32FC1), cv::Point(-1,-1), 2);
+        // find the centroid of the largest blob
+        cv::Mat labeli;
+        labelf.convertTo(labeli, CV_8UC1);
+        std::vector<std::vector<cv::Point> > contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(labeli, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+        if(contours.size() == 0)
+        {
+          ROS_WARN("Nothing detected!!");
+        } else
+        {
+          cv::drawContours(smallFrame, contours, -1, cv::Scalar(0,0,255), 2, CV_AA);
+          // look for largest blob
+          size_t bigIdx = 0;
+          double contourArea = 0.0;
+          for(size_t ii = 0; ii < contours.size(); ii++)
+          {
+            double tempA = cv::contourArea(contours.at(ii));
+            if(tempA > contourArea)
+            {
+              contourArea = tempA;
+              bigIdx = ii;
+            }
+          }
+          cv::drawContours(smallFrame, contours, bigIdx, cv::Scalar(0,255,0), -1, CV_AA);
+        }
+
+        cv::putText(smallFrame, "Auto Mode" , cv::Point(20, 10),
+                      cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255,0,0));
+
+        imshow(searchWindowName, labelf);
+    }
+public:
+    Sphero(){
+        ros::param::param<std::string>("~vidSource", vidSource, "/vid/video0");
+        ros::param::param<double>("~kineticScaling", kineticScaling, 0.01);
+        ros::param::param<double>("~imageScaling", imageScaling, 0.5);
+        ros::param::param<std::string>("~modelFilename", modelFilename, "sphero.yml");
+        image_transport::ImageTransport it(nh);
+        sub = it.subscribe(vidSource, 1, &Sphero::spheroDetectSphero, this, image_transport::TransportHints("compressed"));
+
+        joySub = nh.subscribe<sensor_msgs::Joy>("/joy", 1000, &Sphero::callbackJoyMsg, this);
+
+        if(fileExists(modelFilename)){
+            nbClassifier.load(modelFilename.c_str());
+            ROS_INFO("Loaded %s", modelFilename.c_str());
+        } else {
+            ROS_WARN("No model loaded");
+        }
+
+    }
+
+    ~Sphero(){
+      cv::destroyWindow(windowName);
+    }
+};
+
+bool Sphero::fileExists(const std::string& fname)
+{
+  std::ifstream f(fname.c_str());
+  if(f.good())
+  {
+    f.close();
+    return true;
+  } else
+  {
+    f.close();
+    return false;
+  }
+}
+
+
+
+
+int main(int argc, char **argv){
+    ros::init(argc, argv, "spheroDriver");
+    ros::spin();
+    return(0);
+}

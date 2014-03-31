@@ -1,0 +1,23 @@
+<launch>
+  <node name="sphero" pkg="sphero_node" type="sphero.py" />
+
+  <node name="image_pub" pkg="img_pub" type="img_pub_node" output="screen">
+    <param name="cam" value="2" />
+  </node>
+
+  <!--<node name="vid_viewer" pkg="image_view" type="image_view" output="screen">
+    <remap from="image" to="/camera/image_raw" />
+  </node>-->
+
+  <node name="joy" pkg="joy" type="joy_node" output="screen">
+    <param name="dev" value="/dev/input/js0" />
+  </node>
+
+  <node name="normalModeling" pkg="runner_sphero" type="runner_sphero_node" output="screen">
+    <param name="vidSource" value="/camera/image_raw" />
+    <param name="kineticScaling" value="0.02" />
+    <param name="imageScaling" value="0.25" />
+    <param name="spheroModel" value="$(find runner_sphero)/sphero.yml" />
+    <param name="paperModel" value="$(find runner_sphero)/paper.yml" />
+  </node>
+</launch>
