@@ -22,7 +22,6 @@ private:
     cv::Mat frame;
     cv::NormalBayesClassifier spheroClassifier;
     cv::NormalBayesClassifier paperClassifier;
-    bool fileExists(const std::string& fname);
     std::string vidSource, spheroModel, paperModel, windowName;
     double kineticScaling, imageScaling;
     ros::NodeHandle nh;
@@ -30,8 +29,10 @@ private:
     ros::Publisher vel;
     ros::Publisher heading;
     image_transport::Subscriber sub;
-    bool go, goPressed, publish,first;
+    bool go, goPressed, publish;
+    sensor_msgs::ImageConstPtr* message;
     static void mouseCallback(int event, int x, int y, int flags, void* params);
+    bool fileExists(const std::string& fname);
 
     void doMouseCallback(int event, int x, int y, int flags, void* params){
         if(event==CV_EVENT_LBUTTONDOWN){
@@ -58,21 +59,28 @@ private:
         }else if(goPressed && msg->buttons[0]==0){
             goPressed=false;
         }
-    }
-    void calibrate(const sensor_msgs::ImageConstPtr& msg){
 
-        cv::Point2f sphero1 = detectModel(msg, true);
+        if(msg->buttons[1] == 1 && !goPressed ){
+            goPressed = true;
+            calibrate();
+        }else if(goPressed && msg->buttons[0]==0){
+            goPressed=false;
+        }
+    }
+    void calibrate(){
+
+        cv::Point2f sphero1 = detectModel(*message, true);
         double now = ros::Time::now().toSec();
         ros::Duration t(1);
         double then = t.toSec();
-
+        go=false;
         while(then - now > 0){
             geometry_msgs::Twist t;
             t.linear.x = 10;
             vel.publish(t);
             now = ros::Time::now().toSec();
         }
-        cv::Point2f sphero2 = detectModel(msg, true);
+        cv::Point2f sphero2 = detectModel(*message, true);
 
         double X = sqrt(pow(sphero1.x-sphero2.x,2)+(sphero1.y-sphero2.y,2));
         double Z = sqrt(pow(sphero1.x+X-sphero2.x,2)+(sphero1.y-sphero2.y,2));
@@ -80,18 +88,13 @@ private:
         std_msgs::Float32 head;
         head.data = theta;
         heading.publish(head);
+        go=true;
 
 
     }
 
     void spheroDetectSphero(const sensor_msgs::ImageConstPtr& msg){
-        if(first){
-            cv::Point2f sphero = detectModel(msg,true);
-            if(sphero.x>0 && sphero.y>0){
-                calibrate(msg);
-                first=false;
-            }
-        }
+        *message = msg;
         cv::Point2f paper = detectModel(msg,false);
         cv::Point2f sphero = detectModel(msg,true);
         cv::Point2f distance = cv::Point2f( sphero.x-paper.x , paper.y-sphero.y );
@@ -166,8 +169,7 @@ private:
 
 public:
     Sphero(){
-        go = goPressed = publish = first= false;
-
+        go = goPressed = publish = false;
         windowName = "Current Image";
         // create the display window
         cv::namedWindow(windowName, CV_WINDOW_AUTOSIZE);
